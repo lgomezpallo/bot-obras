@@ -118,15 +118,38 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("Todos", callback_data="Todos"),
-         InlineKeyboardButton("Pendiente", callback_data="Pendiente")],
-        [InlineKeyboardButton("En Ejecución", callback_data="En Ejecución"),
-         InlineKeyboardButton("Finalizada", callback_data="Finalizada")],
-        [InlineKeyboardButton("Pausada", callback_data="Pausada")],
-        [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]
-    ]
-    await update.effective_message.reply_text("Seleccione estado a mostrar:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT estado FROM presupuestos ORDER BY estado;")
+    estados = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    if not estados:
+        await update.effective_message.reply_text(
+            "❌ No hay obras cargadas.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]])
+        )
+        return ConversationHandler.END
+
+    keyboard = []
+    if estados: keyboard.append([InlineKeyboardButton("Todos", callback_data="Todos")])
+
+    fila = []
+    for est in estados:
+        fila.append(InlineKeyboardButton(est, callback_data=est))
+        if len(fila) == 2:
+            keyboard.append(fila)
+            fila = []
+    if fila: keyboard.append(fila)
+
+    keyboard.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
+
+    await update.effective_message.reply_text(
+        "Seleccione estado a mostrar:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return VER_FILTRO
 
 async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,7 +162,6 @@ async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_connection()
     cur = conn.cursor()
 
-    # Botones de salida
     botones_salida = [
         [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")],
         [InlineKeyboardButton("Menú Anterior", callback_data="VER")]
@@ -205,5 +227,5 @@ if __name__ == "__main__":
     app.add_handler(conv_agregar)
     app.add_handler(conv_ver)
 
-    print("Bot Presupuestos definitivo iniciado y listo")
+    print("Bot Presupuestos completo iniciado y listo")
     app.run_polling()
