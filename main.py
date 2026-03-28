@@ -15,9 +15,10 @@ def get_connection():
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA,
     AGREGAR_ESQUINA, AGREGAR_ELEMENTO, AGREGAR_ID_ELEMENTO,
-    EDITAR_SELECCION, EDITAR_CAMPO, ELIMINAR_SELECCION, CONFIRMAR_ELIMINAR,
-    MODIFICAR_ESTADO_SELECCION, INGRESAR_MOTIVO
-) = range(12)
+    EDITAR_SELECCION, EDITAR_CAMPO,
+    ELIMINAR_SELECCION, CONFIRMAR_ELIMINAR,
+    MODIFICAR_ESTADO_SELECCION, INGRESAR_MOTIVO, FIN
+) = range(13)
 
 ELEMENTOS = ["Sumidero", "B.R.", "C.I.", "Conducto", "Canaleta"]
 ESTADOS = ["Pendiente", "En Ejecución", "Finalizada", "Pausada"]
@@ -168,9 +169,9 @@ async def filtrar_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filtro = query.data.replace("FILTRAR_", "")
     conn = get_connection(); cur = conn.cursor()
     if filtro=="TODOS":
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos ORDER BY presupuesto ASC")
+        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY presupuesto ASC")
     else:
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC",(filtro,))
+        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC",(filtro,))
     rows = cur.fetchall(); cur.close(); conn.close()
     if not rows:
         await query.edit_message_text(f"No hay obras con estado {filtro}.",
@@ -206,6 +207,6 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(ver_obras, pattern="^VER$"))
     app.add_handler(CallbackQueryHandler(filtrar_estado, pattern="^FILTRAR_"))
 
-    # Editar, Eliminar, Modificar Estado se integran como ConversationHandlers similares
+    # Editar, Eliminar y Modificar Estado se agregan como ConversationHandlers similares
 
     app.run_polling()
