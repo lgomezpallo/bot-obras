@@ -128,8 +128,7 @@ async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn.close()
 
     await update.message.reply_text("✅ Obra agregada correctamente!", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")],
-        [InlineKeyboardButton("Menú Anterior", callback_data="PRINCIPAL")]
+        [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]
     ]))
     return ConversationHandler.END
 
@@ -329,58 +328,75 @@ async def editar_valor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-# --- MAIN ---
-if __name__ == "__main__":
-    TOKEN = os.environ.get("BOT_TOKEN")
-    app = ApplicationBuilder().token(TOKEN).build()
+# --- MODIFICAR ESTADO ---
+async def mod_estado_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-    conv_agregar = ConversationHandler(
-        entry_points=[CallbackQueryHandler(agregar_start, pattern="^AGREGAR$")],
-        states={
-            AGREGAR_PRESUPUESTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_presupuesto)],
-            AGREGAR_CALLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_calle)],
-            AGREGAR_ALTURA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_altura)],
-            AGREGAR_ESQUINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_esquina)],
-            AGREGAR_ELEMENTO: [CallbackQueryHandler(agregar_elemento)],
-            AGREGAR_ID_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_id_elemento)]
-        },
-        fallbacks=[CallbackQueryHandler(cancelar, pattern="CANCEL")]
-    )
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY presupuesto ASC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
 
-    conv_ver = ConversationHandler(
-        entry_points=[CallbackQueryHandler(ver_start, pattern="^VER$")],
-        states={VER_FILTRO: [CallbackQueryHandler(ver_filtro)]},
-        fallbacks=[CallbackQueryHandler(cancelar, pattern="CANCEL")]
-    )
+    if not rows:
+        await query.edit_message_text("No hay obras para modificar estado.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]
+        ]))
+        return ConversationHandler.END
 
-    conv_eliminar = ConversationHandler(
-        entry_points=[CallbackQueryHandler(eliminar_start, pattern="^ELIMINAR$")],
-        states={
-            ELIMINAR_SELECCION: [CallbackQueryHandler(eliminar_seleccion)],
-            ELIMINAR_CONFIRMAR: [CallbackQueryHandler(eliminar_confirmar)]
-        },
-        fallbacks=[CallbackQueryHandler(cancelar, pattern="CANCEL")]
-    )
+    botones = [[InlineKeyboardButton(f"P-{r[0]} - {r[1]} {r[2]} ({r[3]})", callback_data=r[0])] for r in rows]
+    botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
+    await query.edit_message_text("Seleccione obra para modificar estado:", reply_markup=InlineKeyboardMarkup(botones))
+    return MOD_ESTADO_SELEC
 
-    conv_editar = ConversationHandler(
-        entry_points=[CallbackQueryHandler(editar_start, pattern="^EDITAR$")],
-        states={
-            EDITAR_SELECCION: [CallbackQueryHandler(editar_seleccion)],
-            EDITAR_CAMPO: [CallbackQueryHandler(editar_campo)],
-            EDITAR_VALOR: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, editar_valor),
-                CallbackQueryHandler(editar_valor)
-            ]
-        },
-        fallbacks=[CallbackQueryHandler(cancelar, pattern="CANCEL")]
-    )
+async def mod_estado_seleccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "CANCEL": return await cancelar(update, context)
+    context.user_data['estado_id'] = query.data
 
-    app.add_handler(conv_agregar)
-    app.add_handler(conv_ver)
-    app.add_handler(conv_eliminar)
-    app.add_handler(conv_editar)
-    app.add_handler(CallbackQueryHandler(menu_principal, pattern="^PRINCIPAL$"))
-    app.add_handler(CommandHandler("start", start))
+    estados = ["Pendiente", "En Ejecución", "Finalizada", "Pausada"]
+    botones = [[InlineKeyboardButton(e, callback_data=e)] for e in estados]
+    botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
+    await query.edit_message_text("Seleccione nuevo estado:", reply_markup=InlineKeyboardMarkup(botones))
+    return MOD_ESTADO_NUEVO
 
-    print("Bot corriendo...")
-    app.run_polling()
+async def mod_estado_nuevo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "CANCEL": return await cancelar(update, context)
+
+    context.user_data['nuevo_estado'] = query.data
+    if query.data == "Pausada":
+        await query.edit_message_text("Ingrese motivo de la pausa (opcional) o Omitir / Cancelar:")
+        return MOD_ESTADO_PAUSA
+    else:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE presupuestos SET estado=%s WHERE presupuesto=%s", 
+                    (query.data, context.user_data['estado_id']))
+        conn.commit()
+        cur.close()
+        conn.close()
+        await query.edit_message_text(f"✅ Estado actualizado a {query.data}", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]
+        ]))
+        return ConversationHandler.END
+
+async def mod_estado_pausa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text.lower() == "cancelar": return await cancelar(update, context)
+    motivo = None if text.lower() == "omitir" else text
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE presupuestos SET estado=%s WHERE presupuesto=%s", 
+                ("Pausada", context.user_data['estado_id']))
+    conn.commit()
+    cur.close()
+    conn.close()
+    await update.message.reply_text(f"✅ Estado actualizado a Pausada. Motivo: {motivo if motivo else 'Sin motivo'}", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]
+    ]))
