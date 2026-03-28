@@ -25,7 +25,7 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
     return ConversationHandler.END
 
-# --- Inicio ---
+# --- Menú Principal ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Agregar", callback_data="AGREGAR"),
@@ -44,6 +44,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Bienvenido! Elegí una opción:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+# --- CALLBACK MENÚ PRINCIPAL ---
+async def menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await start(update, context)
 
 # --- AGREGAR OBRA ---
 async def agregar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,7 +117,7 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("✅ Obra agregada correctamente!")
     return ConversationHandler.END
 
-# --- VER OBRA (limpio) ---
+# --- VER OBRAS ---
 async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -219,6 +225,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv_agregar)
     app.add_handler(conv_ver)
+
+    # --- Handler MENÚ PRINCIPAL ---
+    app.add_handler(CallbackQueryHandler(menu_principal, pattern="^PRINCIPAL$"))
 
     print("Bot Presupuestos completo iniciado y listo")
     app.run_polling()
