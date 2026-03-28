@@ -1,5 +1,5 @@
 import os
-import sqlite3 # Importamos el módulo SQLite
+import sqlite3
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,16 +14,14 @@ from telegram.ext import (
 # ==========================
 # BASE DE DATOS - CONFIGURACION
 # ==========================
-DATABASE_NAME = 'obras.db' # Nombre del archivo de la base de datos SQLite
+DATABASE_NAME = 'obras.db'
 
 def get_db_connection():
-    """Establece y retorna una conexión a la base de datos SQLite."""
     conn = sqlite3.connect(DATABASE_NAME)
-    conn.row_factory = sqlite3.Row # Para acceder a las columnas por nombre
+    conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    """Inicializa la base de datos, creando la tabla 'obras' si no existe."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -41,11 +39,6 @@ def init_db():
     conn.close()
 
 # ==========================
-# BASE DE DATOS TEMPORAL (ahora no la usaremos directamente)
-# ==========================
-# OBRAS = []   # Ya no la usaremos directamente, ahora los datos van a SQLite
-
-# ==========================
 #      ESTADOS GLOBALES
 # ==========================
 AGREGAR_PRESUPUESTO = "AGREGAR_PRESUPUESTO"
@@ -53,6 +46,7 @@ AGREGAR_CALLE = "AGREGAR_CALLE"
 AGREGAR_ALTURA = "AGREGAR_ALTURA"
 AGREGAR_ESQUINA = "AGREGAR_ESQUINA"
 AGREGAR_ELEMENTO = "AGREGAR_ELEMENTO"
+AGREGAR_OTRO_ELEMENTO = "AGREGAR_OTRO_ELEMENTO" # Nuevo estado para elemento "Otro"
 AGREGAR_ID_ELEMENTO = "AGREGAR_ID_ELEMENTO"
 AGREGAR_CONFIRMAR = "AGREGAR_CONFIRMAR"
 
@@ -126,9 +120,12 @@ async def agregar_esquina(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["nueva_obra"]["esquina"] = update.message.text.strip()
 
     keyboard = [
-        [InlineKeyboardButton("Caño", callback_data="ELEM_CAÑO")],
-        [InlineKeyboardButton("Cámara", callback_data="ELEM_CAMARA")],
-        [InlineKeyboardButton("Sumidero", callback_data="ELEM_SUMIDERO")],
+        [InlineKeyboardButton("Sumidero", callback_data="ELEM_Sumidero")],
+        [InlineKeyboardButton("Cámara intermedia", callback_data="ELEM_Cámara intermedia")],
+        [InlineKeyboardButton("Canaleta", callback_data="ELEM_Canaleta")],
+        [InlineKeyboardButton("Boca de registro", callback_data="ELEM_Boca de registro")],
+        [InlineKeyboardButton("Conducto", callback_data="ELEM_Conducto")],
+        [InlineKeyboardButton("Otro", callback_data="ELEM_OTRO")], # Nuevo botón "Otro"
     ]
     await update.message.reply_text("Seleccioná el elemento:", reply_markup=InlineKeyboardMarkup(keyboard))
     return AGREGAR_ELEMENTO
@@ -137,10 +134,25 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    elemento = query.data.replace("ELEM_", "")
-    context.user_data["nueva_obra"]["elemento"] = elemento
+    elemento_seleccionado = query.data.replace("ELEM_", "")
 
-    await query.edit_message_text("Ingresá el ID del elemento:")
+    if elemento_seleccionado == "OTRO":
+        await query.edit_message_text("Ingresá el nombre del elemento (texto libre):")
+        return AGREGAR_OTRO_ELEMENTO # Va al nuevo estado
+    else:
+        context.user_data["nueva_obra"]["elemento"] = elemento_seleccionado
+        await query.edit_message_text("Ingresá el ID del elemento:")
+        return AGREGAR_ID_ELEMENTO
+
+# Nueva función para manejar la entrada de texto libre para "Otro" elemento
+async def agregar_otro_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto_libre_elemento = update.message.text.strip()
+    if not texto_libre_elemento:
+        await update.message.reply_text("No ingresaste ningún nombre para el elemento. Por favor, intentá de nuevo:")
+        return AGREGAR_OTRO_ELEMENTO # Se queda en el mismo estado si está vacío
+
+    context.user_data["nueva_obra"]["elemento"] = texto_libre_elemento
+    await update.message.reply_text("Ingresá el ID del elemento:")
     return AGREGAR_ID_ELEMENTO
 
 async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,7 +184,6 @@ async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     obra_a_guardar = context.user_data["nueva_obra"]
 
-    # ======= MODIFICACIÓN AQUÍ: GUARDAR EN SQLite =======
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -190,13 +201,12 @@ async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         await query.edit_message_text("Obra agregada correctamente a la base de datos.")
     except Exception as e:
-        conn.rollback() # En caso de error, deshacemos la transacción
+        conn.rollback()
         await query.edit_message_text(f"Hubo un error al guardar la obra: {e}")
     finally:
         conn.close()
-    # ====================================================
 
-    context.user_data["nueva_obra"] = {} # Limpiamos los datos temporales
+    context.user_data["nueva_obra"] = {}
 
     keyboard = [
         [InlineKeyboardButton("Agregar obra", callback_data="AGREGAR")],
@@ -229,11 +239,10 @@ async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # ======= NUEVO AQUÍ: LECTURA DESDE SQLite =======
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT presupuesto, calle, altura, esquina, elemento, id_elemento FROM obras")
-    obras_db = cursor.fetchall() # Obtenemos todas las obras
+    cursor.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, id_elemento FROM obras")
+    obras_db = cursor.fetchall()
     conn.close()
 
     if not obras_db:
@@ -241,15 +250,13 @@ async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         mensaje = "**Listado de Obras:**\n\n"
         for i, obra in enumerate(obras_db):
-            # Accedemos a los campos por nombre gracias a conn.row_factory = sqlite3.Row
-            mensaje += f"**Obra {i+1}:**\n"
+            mensaje += f"**Obra {obra['id']}:**\n"
             mensaje += f"  Presupuesto: {obra['presupuesto']}\n"
             mensaje += f"  Calle: {obra['calle']}\n"
             mensaje += f"  Altura: {obra['altura']}\n"
             mensaje += f"  Esquina: {obra['esquina']}\n"
             mensaje += f"  Elemento: {obra['elemento']}\n"
             mensaje += f"  ID Elemento: {obra['id_elemento']}\n\n"
-    # ====================================================
 
     await query.edit_message_text(mensaje, parse_mode="Markdown")
     keyboard = [[InlineKeyboardButton("Volver al Menú Principal", callback_data="PRINCIPAL")]]
@@ -280,7 +287,7 @@ async def modificar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #          RUN
 # ==========================
 if __name__ == "__main__":
-    init_db() # ======= NUEVO: Inicializamos la base de datos al iniciar el bot =======
+    init_db()
     app = ApplicationBuilder().token(os.environ["TOKEN"]).build()
 
     # MENÚ PRINCIPAL
@@ -296,6 +303,7 @@ if __name__ == "__main__":
             AGREGAR_ALTURA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_altura)],
             AGREGAR_ESQUINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_esquina)],
             AGREGAR_ELEMENTO: [CallbackQueryHandler(agregar_elemento)],
+            AGREGAR_OTRO_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_otro_elemento)], # Maneja la entrada de texto libre
             AGREGAR_ID_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_id_elemento)],
             AGREGAR_CONFIRMAR: [CallbackQueryHandler(agregar_confirmar, pattern="^CONFIRMAR_OBRA$")],
         },
