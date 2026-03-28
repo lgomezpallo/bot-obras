@@ -202,7 +202,7 @@ async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(botones_salida))
         return ConversationHandler.END
 
-# --- ELIMINAR OBRA CORREGIDO ---
+# --- ELIMINAR OBRA ---
 async def eliminar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -219,7 +219,6 @@ async def eliminar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ No hay obras para eliminar.", reply_markup=InlineKeyboardMarkup(botones))
         return ConversationHandler.END
 
-    # Generar botones en filas de 2
     keyboard = []
     fila = []
     for obra in obras:
@@ -245,7 +244,7 @@ async def eliminar_seleccion(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("No", callback_data="CANCEL")]
     ]
     await query.edit_message_text(
-        f"¿Seguro que querés eliminar la obra P-{context.user_data['eliminar_id']}?",
+        f"⚠️ ¿Seguro que querés eliminar la obra P-{context.user_data['eliminar_id']}?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ELIMINAR_CONFIRMAR
@@ -272,7 +271,6 @@ if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Conversaciones
     conv_agregar = ConversationHandler(
         entry_points=[CallbackQueryHandler(agregar_start, pattern="^AGREGAR$")],
         states={
