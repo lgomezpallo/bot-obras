@@ -1,3 +1,4 @@
+import os
 import psycopg2
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -6,8 +7,9 @@ from telegram.ext import (
 )
 
 # --- Configuración de la DB ---
-DATABASE_URL = "postgresql://postgres:ZRLJVotAbsNxThTetXDcKOpHeXwCLgDZ@postgres.railway.internal:5432/railway"
+DATABASE_URL = os.environ.get("DATABASE_URL")  # Se toma directamente de la variable de entorno
 
+# --- Conexión a la DB ---
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
@@ -119,32 +121,19 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Ver obras ---
 async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
-        estado_filtro = query.data
-    else:
-        estado_filtro = None
-
     conn = get_connection()
     cur = conn.cursor()
-    if estado_filtro and estado_filtro != "Todos":
-        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos WHERE estado=%s ORDER BY id;", (estado_filtro,))
-    else:
-        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY id;")
+    cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY id;")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
     if not rows:
         await update.effective_message.reply_text("No hay presupuestos cargados aún.")
         return
-
     msg = ""
     for r in rows:
         msg += f"P-{r[0]} - {r[1]} {r[2]} [{r[3]}]\n"
     await update.effective_message.reply_text(msg)
-    return
 
 # --- Editar obra ---
 async def editar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -257,7 +246,8 @@ async def modificar_motivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Main ---
 if __name__ == "__main__":
-    app = ApplicationBuilder().token("TU_TELEGRAM_TOKEN_AQUI").build()
+    TOKEN = os.environ.get("BOT_TOKEN")  # Token del bot como variable de entorno
+    app = ApplicationBuilder().token(TOKEN).build()
 
     conv_agregar = ConversationHandler(
         entry_points=[CallbackQueryHandler(agregar_start, pattern="^AGREGAR$")],
