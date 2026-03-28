@@ -15,10 +15,8 @@ def get_connection():
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA, AGREGAR_ESQUINA, AGREGAR_ELEMENTO,
     VER_FILTRO,
-    EDITAR_SELECCION, EDITAR_CAMPO, EDITAR_CONFIRMAR,
-    ELIMINAR_SELECCION, ELIMINAR_CONFIRMAR,
-    MOD_ESTADO_SELECCION, MOD_ESTADO_OPCION, MOD_ESTADO_MOTIVO
-) = range(14)
+    ELIMINAR_SELECCION, ELIMINAR_CONFIRMAR
+) = range(8)
 
 # --- Cancelar ---
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -204,7 +202,7 @@ async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(botones_salida))
         return ConversationHandler.END
 
-# --- ELIMINAR OBRA ---
+# --- ELIMINAR OBRA CORREGIDO ---
 async def eliminar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -221,10 +219,16 @@ async def eliminar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ No hay obras para eliminar.", reply_markup=InlineKeyboardMarkup(botones))
         return ConversationHandler.END
 
+    # Generar botones en filas de 2
     keyboard = []
+    fila = []
     for obra in obras:
         text = f"P-{obra[0]} - {obra[1]} {obra[2]}"
-        keyboard.append([InlineKeyboardButton(text, callback_data=f"DEL_{obra[0]}")])
+        fila.append(InlineKeyboardButton(text, callback_data=f"DEL_{obra[0]}"))
+        if len(fila) == 2:
+            keyboard.append(fila)
+            fila = []
+    if fila: keyboard.append(fila)
     keyboard.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
 
     await query.edit_message_text("Seleccione la obra a eliminar:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -262,32 +266,6 @@ async def eliminar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(f"✅ Obra P-{obra_id} eliminada correctamente.")
     await start(update, context)
     return ConversationHandler.END
-
-# --- MODIFICAR ESTADO ---
-async def mod_estado_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY presupuesto;")
-    obras = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    if not obras:
-        await query.edit_message_text("❌ No hay obras.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]]))
-        return ConversationHandler.END
-
-    keyboard = [[InlineKeyboardButton(f"P-{o[0]} - {o[1]} {o[2]} ({o[3]})", callback_data=f"MOD_{o[0]}")] for o in obras]]
-    keyboard = [[InlineKeyboardButton(f"P-{o[0]} - {o[1]} {o[2]} ({o[3]})", callback_data=f"MOD_{o[0]}")] for o in obras]
-    # separo por fila
-    keyboard_split = []
-    for i in range(0,len(keyboard),2): keyboard_split.append(keyboard[i:i+2])
-    keyboard_split.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
-
-    await query.edit_message_text("Seleccione obra a modificar estado:", reply_markup=InlineKeyboardMarkup(keyboard_split))
-    return MOD_ESTADO_OPCION
 
 # --- MAIN ---
 if __name__ == "__main__":
@@ -328,5 +306,5 @@ if __name__ == "__main__":
     app.add_handler(conv_eliminar)
     app.add_handler(CallbackQueryHandler(menu_principal, pattern="^PRINCIPAL$"))
 
-    print("Bot Presupuestos FINAL completo iniciado y listo")
+    print("Bot Presupuestos FINAL actualizado y listo")
     app.run_polling()
