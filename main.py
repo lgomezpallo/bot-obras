@@ -22,6 +22,7 @@ def get_db_connection():
     return conn
 
 def init_db():
+    """Inicializa la base de datos, creando la tabla 'obras' y añadiendo nuevas columnas si no existen."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -32,7 +33,9 @@ def init_db():
             altura INTEGER NOT NULL,
             esquina TEXT,
             elemento TEXT NOT NULL,
-            id_elemento TEXT NOT NULL
+            id_elemento TEXT NOT NULL,
+            estado TEXT DEFAULT 'Pendiente',
+            descripcion_estado TEXT
         )
     ''')
     conn.commit()
@@ -46,8 +49,11 @@ AGREGAR_CALLE = "AGREGAR_CALLE"
 AGREGAR_ALTURA = "AGREGAR_ALTURA"
 AGREGAR_ESQUINA = "AGREGAR_ESQUINA"
 AGREGAR_ELEMENTO = "AGREGAR_ELEMENTO"
-AGREGAR_OTRO_ELEMENTO = "AGREGAR_OTRO_ELEMENTO" # Nuevo estado para elemento "Otro"
+AGREGAR_OTRO_ELEMENTO = "AGREGAR_OTRO_ELEMENTO"
 AGREGAR_ID_ELEMENTO = "AGREGAR_ID_ELEMENTO"
+AGREGAR_ESTADO = "AGREGAR_ESTADO"
+AGREGAR_OTRO_ESTADO = "AGREGAR_OTRO_ESTADO" # NUEVO ESTADO: para ingresar el nombre del estado "Otro"
+AGREGAR_DESCRIPCION_ESTADO = "AGREGAR_DESCRIPCION_ESTADO" # Este sigue siendo para la descripción de "Pausada"
 AGREGAR_CONFIRMAR = "AGREGAR_CONFIRMAR"
 
 # ==========================
@@ -125,7 +131,7 @@ async def agregar_esquina(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Canaleta", callback_data="ELEM_Canaleta")],
         [InlineKeyboardButton("Boca de registro", callback_data="ELEM_Boca de registro")],
         [InlineKeyboardButton("Conducto", callback_data="ELEM_Conducto")],
-        [InlineKeyboardButton("Otro", callback_data="ELEM_OTRO")], # Nuevo botón "Otro"
+        [InlineKeyboardButton("Otro", callback_data="ELEM_OTRO")],
     ]
     await update.message.reply_text("Seleccioná el elemento:", reply_markup=InlineKeyboardMarkup(keyboard))
     return AGREGAR_ELEMENTO
@@ -138,18 +144,17 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if elemento_seleccionado == "OTRO":
         await query.edit_message_text("Ingresá el nombre del elemento (texto libre):")
-        return AGREGAR_OTRO_ELEMENTO # Va al nuevo estado
+        return AGREGAR_OTRO_ELEMENTO
     else:
         context.user_data["nueva_obra"]["elemento"] = elemento_seleccionado
         await query.edit_message_text("Ingresá el ID del elemento:")
         return AGREGAR_ID_ELEMENTO
 
-# Nueva función para manejar la entrada de texto libre para "Otro" elemento
 async def agregar_otro_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_libre_elemento = update.message.text.strip()
     if not texto_libre_elemento:
         await update.message.reply_text("No ingresaste ningún nombre para el elemento. Por favor, intentá de nuevo:")
-        return AGREGAR_OTRO_ELEMENTO # Se queda en el mismo estado si está vacío
+        return AGREGAR_OTRO_ELEMENTO
 
     context.user_data["nueva_obra"]["elemento"] = texto_libre_elemento
     await update.message.reply_text("Ingresá el ID del elemento:")
@@ -158,6 +163,55 @@ async def agregar_otro_elemento(update: Update, context: ContextTypes.DEFAULT_TY
 async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["nueva_obra"]["id_elemento"] = update.message.text.strip()
 
+    keyboard = [
+        [InlineKeyboardButton("Pendiente", callback_data="ESTADO_Pendiente")],
+        [InlineKeyboardButton("En Ejecución", callback_data="ESTADO_En Ejecucion")],
+        [InlineKeyboardButton("Finalizada", callback_data="ESTADO_Finalizada")],
+        [InlineKeyboardButton("Pausada", callback_data="ESTADO_Pausada")],
+        [InlineKeyboardButton("Otro", callback_data="ESTADO_OTRO")], # Opción para estado libre
+    ]
+    await update.message.reply_text("Seleccioná el estado de la obra:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return AGREGAR_ESTADO
+
+async def agregar_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    estado_seleccionado = query.data.replace("ESTADO_", "")
+
+    if estado_seleccionado == "OTRO": # Si selecciona "Otro", pide el nombre del estado
+        await query.edit_message_text("Ingresá el nombre del estado (texto libre):")
+        return AGREGAR_OTRO_ESTADO # Va al nuevo estado para el nombre del estado "Otro"
+    elif estado_seleccionado == "Pausada": # Si selecciona "Pausada", pide la descripción
+        context.user_data["nueva_obra"]["estado"] = estado_seleccionado
+        await query.edit_message_text(f"Ingresá una descripción para el estado '{estado_seleccionado}':")
+        return AGREGAR_DESCRIPCION_ESTADO
+    else: # Para Pendiente, En Ejecución, Finalizada
+        context.user_data["nueva_obra"]["estado"] = estado_seleccionado
+        context.user_data["nueva_obra"]["descripcion_estado"] = None
+        return await _confirmar_obra_message(update, context, query)
+
+# NUEVA FUNCIÓN: Manejar la entrada de texto libre para el estado "Otro"
+async def agregar_otro_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto_libre_estado = update.message.text.strip()
+    if not texto_libre_estado:
+        await update.message.reply_text("No ingresaste ningún nombre para el estado. Por favor, intentá de nuevo:")
+        return AGREGAR_OTRO_ESTADO
+
+    context.user_data["nueva_obra"]["estado"] = texto_libre_estado
+    context.user_data["nueva_obra"]["descripcion_estado"] = None # No hay descripción para estados personalizados por ahora
+    return await _confirmar_obra_message(update, context)
+
+async def agregar_descripcion_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    descripcion_estado = update.message.text.strip()
+    if not descripcion_estado:
+        await update.message.reply_text("No ingresaste una descripción. Por favor, intentá de nuevo:")
+        return AGREGAR_DESCRIPCION_ESTADO
+
+    context.user_data["nueva_obra"]["descripcion_estado"] = descripcion_estado
+    return await _confirmar_obra_message(update, context)
+
+async def _confirmar_obra_message(update: Update, context: ContextTypes.DEFAULT_TYPE, query=None):
     obra = context.user_data["nueva_obra"]
 
     texto = (
@@ -168,14 +222,20 @@ async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"Esquina: {obra['esquina']}\n"
         f"Elemento: {obra['elemento']}\n"
         f"ID Elemento: {obra['id_elemento']}\n"
+        f"Estado: {obra.get('estado', 'No definido')}\n"
     )
+    if obra.get('descripcion_estado'):
+        texto += f"Descripción Estado: {obra['descripcion_estado']}\n"
 
     keyboard = [
         [InlineKeyboardButton("Confirmar", callback_data="CONFIRMAR_OBRA")],
         [InlineKeyboardButton("Cancelar", callback_data="CANCEL")],
     ]
 
-    await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    if query:
+        await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     return AGREGAR_CONFIRMAR
 
 async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,7 +248,7 @@ async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO obras (presupuesto, calle, altura, esquina, elemento, id_elemento) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO obras (presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 obra_a_guardar["presupuesto"],
                 obra_a_guardar["calle"],
@@ -196,6 +256,8 @@ async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 obra_a_guardar["esquina"],
                 obra_a_guardar["elemento"],
                 obra_a_guardar["id_elemento"],
+                obra_a_guardar.get("estado", "Pendiente"),
+                obra_a_guardar.get("descripcion_estado"),
             ),
         )
         conn.commit()
@@ -241,7 +303,7 @@ async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, id_elemento FROM obras")
+    cursor.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado FROM obras")
     obras_db = cursor.fetchall()
     conn.close()
 
@@ -256,7 +318,11 @@ async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mensaje += f"  Altura: {obra['altura']}\n"
             mensaje += f"  Esquina: {obra['esquina']}\n"
             mensaje += f"  Elemento: {obra['elemento']}\n"
-            mensaje += f"  ID Elemento: {obra['id_elemento']}\n\n"
+            mensaje += f"  ID Elemento: {obra['id_elemento']}\n"
+            mensaje += f"  Estado: {obra['estado']}\n"
+            if obra['descripcion_estado']:
+                mensaje += f"  Descripción Estado: {obra['descripcion_estado']}\n"
+            mensaje += "\n"
 
     await query.edit_message_text(mensaje, parse_mode="Markdown")
     keyboard = [[InlineKeyboardButton("Volver al Menú Principal", callback_data="PRINCIPAL")]]
@@ -303,8 +369,11 @@ if __name__ == "__main__":
             AGREGAR_ALTURA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_altura)],
             AGREGAR_ESQUINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_esquina)],
             AGREGAR_ELEMENTO: [CallbackQueryHandler(agregar_elemento)],
-            AGREGAR_OTRO_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_otro_elemento)], # Maneja la entrada de texto libre
+            AGREGAR_OTRO_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_otro_elemento)],
             AGREGAR_ID_ELEMENTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_id_elemento)],
+            AGREGAR_ESTADO: [CallbackQueryHandler(agregar_estado)],
+            AGREGAR_OTRO_ESTADO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_otro_estado)], # Manejador para el estado "Otro"
+            AGREGAR_DESCRIPCION_ESTADO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_descripcion_estado)],
             AGREGAR_CONFIRMAR: [CallbackQueryHandler(agregar_confirmar, pattern="^CONFIRMAR_OBRA$")],
         },
         fallbacks=[CallbackQueryHandler(cancelar, pattern="^CANCEL$")],
@@ -321,7 +390,4 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(eliminar_start, pattern="^ELIMINAR$"))
 
     # MODIFICAR ESTADO
-    app.add_handler(CallbackQueryHandler(modificar_start, pattern="^MODIFICAR$"))
-
-    print("Bot iniciado…")
-    app.run_polling()
+    app.add_handler(CallbackQueryHandler(modificar
