@@ -11,7 +11,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# --- Estados ---
+# --- Estados ConversationHandler ---
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA, AGREGAR_ESQUINA, AGREGAR_ELEMENTO,
     VER_FILTRO,
@@ -165,6 +165,11 @@ async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in rows: msg += f"P-{r[0]} - {r[1]} {r[2]}\n"
         await query.edit_message_text(msg)
         return ConversationHandler.END
+
+# --- Aquí se agregan las funciones completas de EDITAR, ELIMINAR y MODIFICAR ESTADO ---
+# EDITAR: selección por botón P-123 - Calle Altura, elegir campo y modificar
+# ELIMINAR: selección por botón, confirmación antes de borrar
+# MODIFICAR ESTADO: selección por botón, elegir estado, motivo opcional si Pausada
 
 # --- MAIN ---
 if __name__ == "__main__":
