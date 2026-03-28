@@ -14,11 +14,8 @@ def get_connection():
 # --- Estados ConversationHandler ---
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA, AGREGAR_ESQUINA, AGREGAR_ELEMENTO,
-    VER_FILTRO,
-    EDITAR_SELECCION, EDITAR_CAMPO, EDITAR_VALOR,
-    ELIMINAR_SELECCION, ELIMINAR_CONFIRMAR,
-    MODIFICAR_SELECCION, MODIFICAR_ESTADO, MODIFICAR_MOTIVO
-) = range(14)
+    VER_FILTRO
+) = range(6)
 
 # --- Cancelar ---
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,7 +111,7 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("✅ Obra agregada correctamente!")
     return ConversationHandler.END
 
-# --- VER OBRAS ---
+# --- VER OBRA (limpio) ---
 async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -133,9 +130,7 @@ async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    keyboard = []
-    if estados: keyboard.append([InlineKeyboardButton("Todos", callback_data="Todos")])
-
+    keyboard = [[InlineKeyboardButton("Todos", callback_data="Todos")]]
     fila = []
     for est in estados:
         fila.append(InlineKeyboardButton(est, callback_data=est))
@@ -145,7 +140,6 @@ async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if fila: keyboard.append(fila)
 
     keyboard.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
-
     await update.effective_message.reply_text(
         "Seleccione estado a mostrar:",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -161,38 +155,37 @@ async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     estado = query.data
     conn = get_connection()
     cur = conn.cursor()
-
     botones_salida = [
         [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")],
         [InlineKeyboardButton("Menú Anterior", callback_data="VER")]
     ]
-
-    msg = ""
 
     if estado == "Todos":
         cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY estado, presupuesto;")
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        if not rows: 
+        if not rows:
             await query.edit_message_text("❌ No hay obras.", reply_markup=InlineKeyboardMarkup(botones_salida))
             return ConversationHandler.END
-
         grupos = {}
         for r in rows: grupos.setdefault(r[3], []).append(r)
+        msg = ""
         for est, obras in grupos.items():
             msg += f"🏷 Estado: {est}\n"
             for obra in obras: msg += f"P-{obra[0]} - {obra[1]} {obra[2]}\n"
             msg += "\n"
         await query.edit_message_text(msg.strip(), reply_markup=InlineKeyboardMarkup(botones_salida))
         return ConversationHandler.END
-
     else:
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto;", (estado,))
+        cur.execute(
+            "SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto;",
+            (estado,)
+        )
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        if not rows: 
+        if not rows:
             await query.edit_message_text(f"❌ No tienes obras en estado {estado}.", reply_markup=InlineKeyboardMarkup(botones_salida))
             return ConversationHandler.END
         msg = f"🏷 Estado: {estado}\n\n"
