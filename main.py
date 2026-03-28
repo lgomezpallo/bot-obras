@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes,
     ConversationHandler, MessageHandler, filters, CallbackQueryHandler
@@ -29,6 +29,7 @@ def init_db():
             altura TEXT,
             esquina TEXT,
             elemento TEXT,
+            elemento_id TEXT,
             estado TEXT DEFAULT 'Pendiente'
         );
     """)
@@ -39,13 +40,16 @@ def init_db():
 init_db()
 
 # Estados del ConversationHandler
-PRESUPUESTO, CALLE, ALTURA, ESQUINA, ELEMENTO, ELEMENTO_OTRO = range(6)
+PRESUPUESTO, CALLE, ALTURA, ESQUINA, ELEMENTO, ELEMENTO_OTRO, ELEMENTO_ID = range(7)
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Bot Presupuestos ✅\nComandos disponibles:\n/agregar_obra"
-    )
+    keyboard = [
+        ["Ver Obras", "Agregar Obra"],
+        ["Editar Obras", "Eliminar Obras"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text("Bot Presupuestos ✅ Elegí una opción:", reply_markup=reply_markup)
 
 # Inicia flujo agregar obra
 async def agregar_obra_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,44 +93,36 @@ async def agregar_obra_elemento_callback(update: Update, context: ContextTypes.D
         await query.edit_message_text("Escribí el elemento manualmente:")
         return ELEMENTO_OTRO
     context.user_data['elemento'] = elemento
-    # Guardar en DB
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO presupuestos (presupuesto, calle, altura, esquina, elemento)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (
-        context.user_data['presupuesto'],
-        context.user_data['calle'],
-        context.user_data['altura'],
-        context.user_data['esquina'],
-        context.user_data['elemento']
-    ))
-    conn.commit()
-    cur.close()
-    conn.close()
-    await query.edit_message_text(f"Presupuesto agregado ✅ Elemento: {context.user_data['elemento']} Estado: Pendiente")
-    return ConversationHandler.END
+    await query.edit_message_text(f"Elemento seleccionado: {elemento}\nAhora escribí un identificador o número para este elemento:")
+    return ELEMENTO_ID
 
 # Handler si escribe manualmente Elemento (Otro)
 async def agregar_obra_elemento_otro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['elemento'] = update.message.text
+    await update.message.reply_text("Ahora escribí un identificador o número para este elemento:")
+    return ELEMENTO_ID
+
+# Handler para recibir Identificador del Elemento
+async def agregar_obra_elemento_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['elemento_id'] = update.message.text
+    # Guardar en DB
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO presupuestos (presupuesto, calle, altura, esquina, elemento)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO presupuestos (presupuesto, calle, altura, esquina, elemento, elemento_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """, (
         context.user_data['presupuesto'],
         context.user_data['calle'],
         context.user_data['altura'],
         context.user_data['esquina'],
-        context.user_data['elemento']
+        context.user_data['elemento'],
+        context.user_data['elemento_id']
     ))
     conn.commit()
     cur.close()
     conn.close()
-    await update.message.reply_text(f"Presupuesto agregado ✅ Elemento: {context.user_data['elemento']} Estado: Pendiente")
+    await update.message.reply_text(f"Presupuesto agregado ✅ Elemento: {context.user_data['elemento']} ({context.user_data['elemento_id']}) Estado: Pendiente")
     return ConversationHandler.END
 
 # Cancelar
@@ -144,7 +140,8 @@ conv_handler = ConversationHandler(
         CALLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_calle)],
         ALTURA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_altura)],
         ESQUINA: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_esquina)],
-        ELEMENTO_OTRO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_elemento_otro)]
+        ELEMENTO_OTRO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_elemento_otro)],
+        ELEMENTO_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_elemento_id)],
     },
     fallbacks=[CommandHandler('cancel', cancel)]
 )
