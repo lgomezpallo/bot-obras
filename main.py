@@ -40,18 +40,32 @@ def init_db():
 init_db()
 
 # Estados del ConversationHandler
-PRESUPUESTO, CALLE, ALTURA, ESQUINA, ELEMENTO, ELEMENTO_OTRO, ELEMENTO_ID = range(7)
+PRESUPUESTO, CALLE, ALTURA, ESQUINA, ELEMENTO, ELEMENTO_OTRO, ELEMENTO_ID, EDITAR_ID, EDITAR_CAMPO = range(9)
 
-# /start
+# ----------------- MENÚ INICIAL -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        ["Ver Obras", "Agregar Obra"],
-        ["Editar Obras", "Eliminar Obras"]
+        ["Agregar", "Ver"],
+        ["Editar", "Eliminar"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("Bot Presupuestos ✅ Elegí una opción:", reply_markup=reply_markup)
 
-# Inicia flujo agregar obra
+async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text
+    if choice == "Agregar":
+        return await agregar_obra_start(update, context)
+    elif choice == "Ver":
+        return await ver_obras(update, context)
+    elif choice == "Editar":
+        return await editar_obra_start(update, context)
+    elif choice == "Eliminar":
+        return await eliminar_obra_start(update, context)
+    else:
+        await update.message.reply_text("Opción no válida ❌")
+        return ConversationHandler.END
+
+# ----------------- AGREGAR OBRA -----------------
 async def agregar_obra_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Número de Presupuesto:")
     return PRESUPUESTO
@@ -84,7 +98,7 @@ async def agregar_obra_esquina(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("Seleccioná el Elemento:", reply_markup=reply_markup)
     return ELEMENTO
 
-# Handler para botones Elemento
+# Botones Elemento
 async def agregar_obra_elemento_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -96,16 +110,13 @@ async def agregar_obra_elemento_callback(update: Update, context: ContextTypes.D
     await query.edit_message_text(f"Elemento seleccionado: {elemento}\nAhora escribí un identificador o número para este elemento:")
     return ELEMENTO_ID
 
-# Handler si escribe manualmente Elemento (Otro)
 async def agregar_obra_elemento_otro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['elemento'] = update.message.text
     await update.message.reply_text("Ahora escribí un identificador o número para este elemento:")
     return ELEMENTO_ID
 
-# Handler para recibir Identificador del Elemento
 async def agregar_obra_elemento_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['elemento_id'] = update.message.text
-    # Guardar en DB
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -125,15 +136,81 @@ async def agregar_obra_elemento_id(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text(f"Presupuesto agregado ✅ Elemento: {context.user_data['elemento']} ({context.user_data['elemento_id']}) Estado: Pendiente")
     return ConversationHandler.END
 
-# Cancelar
+# ----------------- VER OBRAS -----------------
+async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, elemento_id, estado FROM presupuestos ORDER BY id;")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    if not rows:
+        await update.message.reply_text("No hay presupuestos cargados aún.")
+        return ConversationHandler.END
+
+    msg = ""
+    for r in rows:
+        msg += f"ID:{r[0]} | Presupuesto:{r[1]} | {r[2]} {r[3]} / {r[4]} | {r[5]} ({r[6]}) | Estado:{r[7]}\n"
+    await update.message.reply_text(msg)
+    return ConversationHandler.END
+
+# ----------------- EDITAR OBRA -----------------
+async def editar_obra_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Escribí el ID de la obra que querés editar:")
+    return EDITAR_ID
+
+async def editar_obra_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['editar_id'] = update.message.text
+    # Pedimos el nuevo estado
+    keyboard = [
+        [InlineKeyboardButton("Pendiente", callback_data="Pendiente"),
+         InlineKeyboardButton("En ejecución", callback_data="En ejecución")],
+        [InlineKeyboardButton("Finalizada", callback_data="Finalizada")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Elegí el nuevo estado:", reply_markup=reply_markup)
+    return EDITAR_CAMPO
+
+async def editar_obra_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    nuevo_estado = query.data
+    obra_id = context.user_data['editar_id']
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE presupuestos SET estado=%s WHERE id=%s", (nuevo_estado, obra_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+    await query.edit_message_text(f"Obra ID {obra_id} actualizada ✅ Nuevo estado: {nuevo_estado}")
+    return ConversationHandler.END
+
+# ----------------- ELIMINAR OBRA -----------------
+async def eliminar_obra_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Escribí el ID de la obra que querés eliminar:")
+    return EDITAR_ID
+
+async def eliminar_obra_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    obra_id = update.message.text
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM presupuestos WHERE id=%s", (obra_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    await update.message.reply_text(f"Obra ID {obra_id} eliminada ✅")
+    return ConversationHandler.END
+
+# ----------------- CANCEL -----------------
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operación cancelada ❌")
     return ConversationHandler.END
 
-# Construimos la app
+# ----------------- MAIN APP -----------------
 app = ApplicationBuilder().token(TOKEN).build()
 
-conv_handler = ConversationHandler(
+conv_handler_agregar = ConversationHandler(
     entry_points=[CommandHandler('agregar_obra', agregar_obra_start)],
     states={
         PRESUPUESTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_obra_presupuesto)],
@@ -146,8 +223,28 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel)]
 )
 
+conv_handler_editar = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex("^Editar$"), editar_obra_start)],
+    states={
+        EDITAR_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, editar_obra_id)],
+        EDITAR_CAMPO: [CallbackQueryHandler(editar_obra_callback)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel)]
+)
+
+conv_handler_eliminar = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex("^Eliminar$"), eliminar_obra_start)],
+    states={
+        EDITAR_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, eliminar_obra_id)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel)]
+)
+
 app.add_handler(CommandHandler("start", start))
-app.add_handler(conv_handler)
+app.add_handler(MessageHandler(filters.Regex("^(Agregar|Ver)$"), menu_choice))
+app.add_handler(conv_handler_agregar)
+app.add_handler(conv_handler_editar)
+app.add_handler(conv_handler_eliminar)
 app.add_handler(CallbackQueryHandler(agregar_obra_elemento_callback, pattern="^(Sumidero|BR|CI|Otro)$"))
 
 if __name__ == "__main__":
