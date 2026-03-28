@@ -15,11 +15,12 @@ def get_connection():
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA,
     AGREGAR_ESQUINA, AGREGAR_ELEMENTO, AGREGAR_ID_ELEMENTO,
-    EDITAR_SELECCION, ELIMINAR_SELECCION, CONFIRMAR_ELIMINAR,
+    EDITAR_SELECCION, EDITAR_CAMPO, ELIMINAR_SELECCION, CONFIRMAR_ELIMINAR,
     MODIFICAR_ESTADO_SELECCION, INGRESAR_MOTIVO
-) = range(11)
+) = range(12)
 
 ELEMENTOS = ["Sumidero", "B.R.", "C.I.", "Conducto", "Canaleta"]
+ESTADOS = ["Pendiente", "En Ejecución", "Finalizada", "Pausada"]
 
 # ---------------- CANCELAR ----------------
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +53,7 @@ async def menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     await start(update, context)
 
-# ---------------- AGREGAR OBRA COMPLETO ----------------
+# ---------------- AGREGAR OBRA ----------------
 async def agregar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
@@ -63,10 +64,8 @@ async def agregar_presupuesto(update: Update, context: ContextTypes.DEFAULT_TYPE
     texto = update.message.text.strip()
     if texto.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['presupuesto'] = texto
-    keyboard = [
-        [InlineKeyboardButton("Omitir", callback_data="OMITIR")],
-        [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]
-    ]
+    keyboard = [[InlineKeyboardButton("Omitir", callback_data="OMITIR")],
+                [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]]
     await update.message.reply_text("Ingrese calle (o Omitir):", reply_markup=InlineKeyboardMarkup(keyboard))
     return AGREGAR_CALLE
 
@@ -74,10 +73,8 @@ async def agregar_calle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
     if texto.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['calle'] = "" if texto.lower() == "omitir" else texto
-    keyboard = [
-        [InlineKeyboardButton("Omitir", callback_data="OMITIR")],
-        [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]
-    ]
+    keyboard = [[InlineKeyboardButton("Omitir", callback_data="OMITIR")],
+                [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]]
     await update.message.reply_text("Ingrese altura (o Omitir):", reply_markup=InlineKeyboardMarkup(keyboard))
     return AGREGAR_ALTURA
 
@@ -85,10 +82,8 @@ async def agregar_altura(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
     if texto.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['altura'] = "" if texto.lower() == "omitir" else texto
-    keyboard = [
-        [InlineKeyboardButton("Omitir", callback_data="OMITIR")],
-        [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]
-    ]
+    keyboard = [[InlineKeyboardButton("Omitir", callback_data="OMITIR")],
+                [InlineKeyboardButton("Cancelar", callback_data="CANCEL")]]
     await update.message.reply_text("Ingrese esquina (o Omitir):", reply_markup=InlineKeyboardMarkup(keyboard))
     return AGREGAR_ESQUINA
 
@@ -124,9 +119,14 @@ async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE
     return await finalizar_obra(update, context)
 
 async def finalizar_obra(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    conn = get_connection(); cur = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
     cur.execute(
-        "INSERT INTO presupuestos (presupuesto, calle, altura, esquina, elemento, id_elemento, estado) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        """
+        INSERT INTO presupuestos
+        (presupuesto, calle, altura, esquina, elemento, id_elemento, estado)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        """,
         (
             context.user_data.get('presupuesto',''),
             context.user_data.get('calle',''),
@@ -180,9 +180,6 @@ async def filtrar_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(
         [[InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]]))
 
-# ---------------- EDITAR, ELIMINAR, MODIFICAR ESTADO ----------------
-# Implementar igual que antes con botones de validación, confirmación y motivo opcional
-
 # ---------------- RUN ----------------
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.environ["TOKEN"]).build()
@@ -209,6 +206,6 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(ver_obras, pattern="^VER$"))
     app.add_handler(CallbackQueryHandler(filtrar_estado, pattern="^FILTRAR_"))
 
-    # Editar, Eliminar, Modificar Estado se agregan aquí como ConversationHandlers
+    # Editar, Eliminar, Modificar Estado se integran como ConversationHandlers similares
 
     app.run_polling()
