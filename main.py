@@ -11,35 +11,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# --- Estados ConversationHandler ---
+# --- Estados ---
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA, AGREGAR_ESQUINA, AGREGAR_ELEMENTO,
     VER_FILTRO,
-    EDITAR_SELECCION, EDITAR_CAMPO,
-    ELIMINAR_SELECCION,
-    MODIFICAR_SELECCION, MODIFICAR_ESTADO, MODIFICAR_MOTIVO,
-    CANCEL
-) = range(13)
-
-# --- Funciones auxiliares ---
-def generar_botones_presupuestos(filtro_estado=None):
-    conn = get_connection()
-    cur = conn.cursor()
-    if filtro_estado and filtro_estado != "Todos":
-        cur.execute("SELECT id, presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC;", (filtro_estado,))
-    else:
-        cur.execute("SELECT id, presupuesto, calle, altura FROM presupuestos ORDER BY presupuesto ASC;")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    botones = [[InlineKeyboardButton(f"P-{r[1]} - {r[2]} {r[3]}", callback_data=str(r[0]))] for r in rows]
-    botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
-    return InlineKeyboardMarkup(botones)
-
-def botones_omitidos(botones_existentes):
-    botones_existentes.append([InlineKeyboardButton("Omitir", callback_data="OMITIR")])
-    botones_existentes.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
-    return InlineKeyboardMarkup(botones_existentes)
+    EDITAR_SELECCION, EDITAR_CAMPO, EDITAR_VALOR,
+    ELIMINAR_SELECCION, ELIMINAR_CONFIRMAR,
+    MODIFICAR_SELECCION, MODIFICAR_ESTADO, MODIFICAR_MOTIVO
+) = range(14)
 
 # --- Cancelar ---
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,12 +37,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("Eliminar", callback_data="ELIMINAR"),
          InlineKeyboardButton("Modificar Estado", callback_data="MODIFICAR")]
     ]
-    await update.effective_message.reply_text(
-        "Bienvenido! Elegí una opción:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            "Bienvenido! Elegí una opción:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.effective_message.reply_text(
+            "Bienvenido! Elegí una opción:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-# --- Agregar obra ---
+# --- AGREGAR OBRA ---
 async def agregar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -72,62 +57,64 @@ async def agregar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def agregar_presupuesto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if text.lower() == "cancelar":
-        return await cancelar(update, context)
+    if text.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['presupuesto'] = text
     await update.message.reply_text("Ingrese la Calle (o Omitir / Cancelar):")
     return AGREGAR_CALLE
 
 async def agregar_calle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if text.lower() == "cancelar":
-        return await cancelar(update, context)
+    if text.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['calle'] = None if text.lower() == "omitir" else text
     await update.message.reply_text("Ingrese la Altura (o Omitir / Cancelar):")
     return AGREGAR_ALTURA
 
 async def agregar_altura(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if text.lower() == "cancelar":
-        return await cancelar(update, context)
+    if text.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['altura'] = None if text.lower() == "omitir" else text
     await update.message.reply_text("Ingrese la Esquina (o Omitir / Cancelar):")
     return AGREGAR_ESQUINA
 
 async def agregar_esquina(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if text.lower() == "cancelar":
-        return await cancelar(update, context)
+    if text.lower() == "cancelar": return await cancelar(update, context)
     context.user_data['esquina'] = None if text.lower() == "omitir" else text
-    elementos = [["Sumidero"], ["Pozo"], ["Tapa"], ["Otro"]]
-    botones = [ [InlineKeyboardButton(el[0], callback_data=el[0])] for el in elementos]
-    botones_markup = botones_omitidos(botones)
-    await update.message.reply_text("Seleccione Elemento:", reply_markup=botones_markup)
+
+    elementos = ["Sumidero", "B.R.", "C.I.", "Conducto", "Canaleta"]
+    botones = [[InlineKeyboardButton(el, callback_data=el)] for el in elementos]
+    botones.append([InlineKeyboardButton("Omitir", callback_data="OMITIR")])
+    botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
+
+    await update.message.reply_text("Seleccione Elemento:", reply_markup=InlineKeyboardMarkup(botones))
     return AGREGAR_ELEMENTO
 
 async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data == "CANCEL":
-        return await cancelar(update, context)
-    context.user_data['elemento'] = None if query.data=="OMITIR" else query.data
+    if query.data == "CANCEL": return await cancelar(update, context)
+    context.user_data['elemento'] = None if query.data == "OMITIR" else query.data
+
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO presupuestos (presupuesto, calle, altura, esquina, elemento, estado) VALUES (%s,%s,%s,%s,%s,'Pendiente')",
-        (context.user_data.get('presupuesto'),
-         context.user_data.get('calle'),
-         context.user_data.get('altura'),
-         context.user_data.get('esquina'),
-         context.user_data.get('elemento'))
+        (
+            context.user_data.get('presupuesto'),
+            context.user_data.get('calle'),
+            context.user_data.get('altura'),
+            context.user_data.get('esquina'),
+            context.user_data.get('elemento')
+        )
     )
     conn.commit()
     cur.close()
     conn.close()
+
     await query.edit_message_text("✅ Obra agregada correctamente!")
     return ConversationHandler.END
 
-# --- Ver obras ---
+# --- VER OBRAS ---
 async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query: await query.answer()
@@ -145,57 +132,41 @@ async def ver_obras_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ver_obras_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    if query.data == "CANCEL":
-        return await cancelar(update, context)
+    if query.data == "CANCEL": return await cancelar(update, context)
 
     estado = query.data
     conn = get_connection()
     cur = conn.cursor()
+    msg = ""
 
     if estado == "Todos":
-        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY estado ASC, presupuesto ASC;")
+        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY estado, presupuesto;")
         rows = cur.fetchall()
         cur.close()
         conn.close()
+        if not rows: await query.edit_message_text("❌ No hay obras."); return ConversationHandler.END
 
-        if not rows:
-            await query.edit_message_text("❌ No hay obras en la base de datos.")
-            return ConversationHandler.END
-
-        # Agrupar por estado
         grupos = {}
-        for r in rows:
-            grupos.setdefault(r[3], []).append(r)
-
-        msg = ""
+        for r in rows: grupos.setdefault(r[3], []).append(r)
         for est, obras in grupos.items():
             msg += f"🏷 Estado: {est}\n"
-            for obra in obras:
-                msg += f"P-{obra[0]} - {obra[1]} {obra[2]}\n"
+            for obra in obras: msg += f"P-{obra[0]} - {obra[1]} {obra[2]}\n"
             msg += "\n"
-
         await query.edit_message_text(msg.strip())
         return ConversationHandler.END
 
     else:
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC;", (estado,))
+        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto;", (estado,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
-
-        if not rows:
-            await query.edit_message_text(f"❌ No tienes obras en estado {estado}.")
-            return ConversationHandler.END
-
+        if not rows: await query.edit_message_text(f"❌ No tienes obras en estado {estado}."); return ConversationHandler.END
         msg = f"🏷 Estado: {estado}\n\n"
-        for r in rows:
-            msg += f"P-{r[0]} - {r[1]} {r[2]}\n"
-
+        for r in rows: msg += f"P-{r[0]} - {r[1]} {r[2]}\n"
         await query.edit_message_text(msg)
         return ConversationHandler.END
 
-# --- Main ---
+# --- MAIN ---
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
@@ -222,5 +193,5 @@ if __name__ == "__main__":
     app.add_handler(conv_agregar)
     app.add_handler(conv_ver)
 
-    print("Bot Presupuestos iniciado con botones Cancelar y listados por estado")
+    print("Bot Presupuestos definitivo iniciado y listo")
     app.run_polling()
