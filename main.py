@@ -15,10 +15,10 @@ def get_connection():
 (
     AGREGAR_PRESUPUESTO, AGREGAR_CALLE, AGREGAR_ALTURA, AGREGAR_ESQUINA, AGREGAR_ELEMENTO,
     AGREGAR_ID_ELEMENTO,
-    VER_FILTRO, VER_LISTADO,
+    VER_FILTRO,
     ELIMINAR_SELECCION, ELIMINAR_CONFIRMAR,
     MOD_ESTADO_SELEC, MOD_ESTADO_NUEVO, MOD_ESTADO_PAUSA
-) = range(13)
+) = range(12)
 
 # --- Cancelar ---
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -136,9 +136,26 @@ async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def ver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    estados = ["Pendiente", "En Ejecución", "Finalizada", "Pausada", "Todos"]
+
+    # Trae solo los estados que tienen obras
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT estado FROM presupuestos ORDER BY estado ASC")
+    estados = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    if not estados:
+        await query.edit_message_text("No hay obras cargadas.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")]
+        ]))
+        return ConversationHandler.END
+
+    # Agrega botón Todos
+    estados.append("Todos")
     botones = [[InlineKeyboardButton(e, callback_data=e)] for e in estados]
     botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
+    
     await query.edit_message_text("Seleccione estado a ver:", reply_markup=InlineKeyboardMarkup(botones))
     return VER_FILTRO
 
@@ -151,9 +168,9 @@ async def ver_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_connection()
     cur = conn.cursor()
     if estado_sel == "Todos":
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos ORDER BY presupuesto ASC")
+        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos ORDER BY presupuesto ASC")
     else:
-        cur.execute("SELECT presupuesto, calle, altura FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC", (estado_sel,))
+        cur.execute("SELECT presupuesto, calle, altura, estado FROM presupuestos WHERE estado=%s ORDER BY presupuesto ASC", (estado_sel,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -161,8 +178,14 @@ async def ver_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await query.edit_message_text(f"No hay obras para el estado {estado_sel}")
     else:
-        msg = f"Obras ({estado_sel}):\n" + "\n".join([f"P-{r[0]} - {r[1]} {r[2]}" for r in rows])
-        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([
+        # Agrupa por estado
+        estados_dict = {}
+        for r in rows:
+            estados_dict.setdefault(r[3], []).append(f"P-{r[0]} - {r[1]} {r[2]}")
+        msg = ""
+        for e, obras in estados_dict.items():
+            msg += f"{e}:\n" + "\n".join(obras) + "\n\n"
+        await query.edit_message_text(msg.strip(), reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Menú Principal", callback_data="PRINCIPAL")],
             [InlineKeyboardButton("Menú Anterior", callback_data="PRINCIPAL")]
         ]))
@@ -220,22 +243,6 @@ async def eliminar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]))
     return ConversationHandler.END
 
-# --- MODIFICAR ESTADO ---
-async def mod_estado_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT DISTINCT estado FROM presupuestos ORDER BY estado ASC")
-    estados = [r[0] for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-
-    botones = [[InlineKeyboardButton(e, callback_data=e)] for e in estados]
-    botones.append([InlineKeyboardButton("Cancelar", callback_data="CANCEL")])
-    await query.edit_message_text("Seleccione obra a modificar:", reply_markup=InlineKeyboardMarkup(botones))
-    return MOD_ESTADO_SELEC
-
 # --- MAIN ---
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
@@ -269,7 +276,6 @@ if __name__ == "__main__":
         fallbacks=[CallbackQueryHandler(cancelar, pattern="CANCEL")]
     )
 
-    # Aquí se integrarían conv_mod_estado y conv_editar igual que los anteriores
     app.add_handler(conv_agregar)
     app.add_handler(conv_ver)
     app.add_handler(conv_eliminar)
