@@ -184,4 +184,53 @@ async def agregar_otro_elemento(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("Ingresá el ID del elemento:")
     return AGREGAR_ID_ELEMENTO
 
-async def agregar_id_elemento(update: Update,
+async def agregar_id_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe el ID del elemento y pide la selección del estado de la obra."""
+    context.user_data["nueva_obra"]["id_elemento"] = update.message.text.strip()
+
+    keyboard = [
+        [InlineKeyboardButton("Pendiente", callback_data="ESTADO_Pendiente")],
+        [InlineKeyboardButton("En Ejecución", callback_data="ESTADO_En Ejecucion")],
+        [InlineKeyboardButton("Finalizada", callback_data="ESTADO_Finalizada")],
+        [InlineKeyboardButton("Pausada", callback_data="ESTADO_Pausada")],
+        [InlineKeyboardButton("Otro", callback_data="ESTADO_OTRO")], # Opción para estado libre
+    ]
+    await update.message.reply_text("Seleccioná el estado de la obra:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return AGREGAR_ESTADO
+
+async def agregar_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja la selección del estado de la obra."""
+    query = update.callback_query
+    await query.answer()
+
+    estado_seleccionado = query.data.replace("ESTADO_", "")
+
+    if estado_seleccionado == "OTRO":
+        await query.edit_message_text("Ingresá el nombre del estado (texto libre):")
+        return AGREGAR_OTRO_ESTADO # Pasa a un estado para recibir el nombre del estado libre
+    elif estado_seleccionado == "Pausada":
+        context.user_data["nueva_obra"]["estado"] = estado_seleccionado
+        await query.edit_message_text(f"Ingresá una descripción para el motivo de '{estado_seleccionado}':")
+        return AGREGAR_DESCRIPCION_ESTADO # Pasa a un estado para recibir la descripción de la pausa
+    else: # Para Pendiente, En Ejecución, Finalizada
+        context.user_data["nueva_obra"]["estado"] = estado_seleccionado
+        context.user_data["nueva_obra"]["descripcion_estado"] = None # No hay descripción para estos estados
+        return await _confirmar_obra_message(update, context, query)
+
+async def agregar_otro_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe el nombre de un estado personalizado (texto libre)."""
+    texto_libre_estado = update.message.text.strip()
+    if not texto_libre_estado:
+        await update.message.reply_text("No ingresaste ningún nombre para el estado. Por favor, intentá de nuevo:")
+        return AGREGAR_OTRO_ESTADO # Se queda en este estado si la entrada es vacía
+
+    context.user_data["nueva_obra"]["estado"] = texto_libre_estado
+    context.user_data["nueva_obra"]["descripcion_estado"] = None # Los estados personalizados no tienen descripción adicional en este flujo
+    return await _confirmar_obra_message(update, context)
+
+async def agregar_descripcion_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe la descripción para el estado 'Pausada'."""
+    descripcion_estado = update.message.text.strip()
+    if not descripcion_estado:
+        await update.message.reply_text("No ingresaste una descripción. Por favor, intentá de nuevo:")
+        return AGREGAR_DESCR
