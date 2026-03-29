@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
+RESET_DB = True  # ⚠️ activar borrado de tabla
+
 if not DATABASE_URL:
     raise ValueError("❌ Falta DATABASE_URL")
 
