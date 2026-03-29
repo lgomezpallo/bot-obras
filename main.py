@@ -166,4 +166,22 @@ async def agregar_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elemento_seleccionado = query.data.replace("ELEM_", "")
 
     if elemento_seleccionado == "OTRO":
-        await query.edit_message_text("Ingresá el nombre del elemento (texto libre
+        await query.edit_message_text("Ingresá el nombre del elemento (texto libre):")
+        return AGREGAR_OTRO_ELEMENTO # Pasa a un estado para recibir el texto libre
+    else:
+        context.user_data["nueva_obra"]["elemento"] = elemento_seleccionado
+        await query.edit_message_text("Ingresá el ID del elemento:")
+        return AGREGAR_ID_ELEMENTO
+
+async def agregar_otro_elemento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe el nombre de un elemento personalizado (texto libre)."""
+    texto_libre_elemento = update.message.text.strip()
+    if not texto_libre_elemento:
+        await update.message.reply_text("No ingresaste ningún nombre para el elemento. Por favor, intentá de nuevo:")
+        return AGREGAR_OTRO_ELEMENTO # Se queda en este estado si la entrada es vacía
+
+    context.user_data["nueva_obra"]["elemento"] = texto_libre_elemento
+    await update.message.reply_text("Ingresá el ID del elemento:")
+    return AGREGAR_ID_ELEMENTO
+
+async def agregar_id_elemento(update: Update,
