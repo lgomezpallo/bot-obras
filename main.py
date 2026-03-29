@@ -1,5 +1,6 @@
 import os
-import sqlite3
+import psycopg2
+from psycopg2 import sql # Para construir consultas SQL de forma segura
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -10,12 +11,11 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-import logging # Importar el módulo de logging
+import logging
 
 # ==========================
 # CONFIGURACIÓN DE LOGGING
 # ==========================
-# Configurar logging básico para ver mensajes en consola (útil para depuración)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
@@ -24,52 +24,84 @@ logger = logging.getLogger(__name__)
 # ==========================
 # BASE DE DATOS - CONFIGURACION
 # ==========================
-DATABASE_NAME = 'obras.db'
+# URL de conexión a Supabase (PostgreSQL) obtenida de Railway
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
-    """Establece y retorna una conexión a la base de datos SQLite."""
-    conn = sqlite3.connect(DATABASE_NAME)
-    conn.row_factory = sqlite3.Row # Para acceder a las columnas por nombre (como si fuera un diccionario)
-    return conn
+    """
+    Establece y retorna una conexión a la base de datos PostgreSQL de Supabase
+    utilizando la URL de conexión proporcionada en la variable de entorno.
+    """
+    if not DATABASE_URL:
+        logger.error("Error: La variable de entorno 'DATABASE_URL' no está configurada.")
+        raise ValueError("DATABASE_URL no configurada.")
+    try:
+        # Aseguramos que se usa sslmode='require' para Supabase
+        # y que se devuelve un cursor de tipo 'dict' para acceder por nombre de columna.
+        conn = psycopg2.connect(DATABASE_URL + "?sslmode=require")
+        # Por defecto, psycopg2.connect() no usa row_factory.
+        # Para acceder a las columnas por nombre como en sqlite3.Row,
+        # necesitarías usar un DictCursor. Lo manejaremos manualmente mapeando
+        # las tuplas a diccionarios en ver_obras.
+        return conn
+    except Exception as e:
+        logger.error(f"Error al conectar a la base de datos PostgreSQL de Supabase: {e}")
+        raise
 
 def init_db():
     """
     Inicializa la base de datos, creando la tabla 'obras' si no existe.
     Si ya existe y faltan columnas, las añade (útil para actualizaciones).
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-    # Creamos la tabla principal si no existe
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS obras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            presupuesto INTEGER NOT NULL,
-            calle TEXT NOT NULL,
-            altura INTEGER NOT NULL,
-            esquina TEXT,
-            elemento TEXT NOT NULL,
-            id_elemento TEXT NOT NULL,
-            estado TEXT DEFAULT 'Pendiente',
-            descripcion_estado TEXT
-        )
-    ''')
+        # Creamos la tabla principal si no existe.
+        # SERIAL PRIMARY KEY es el equivalente de AUTOINCREMENT en PostgreSQL.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS obras (
+                id SERIAL PRIMARY KEY,
+                presupuesto INTEGER NOT NULL,
+                calle TEXT NOT NULL,
+                altura INTEGER NOT NULL,
+                esquina TEXT,
+                elemento TEXT NOT NULL,
+                id_elemento TEXT NOT NULL,
+                estado TEXT DEFAULT 'Pendiente',
+                descripcion_estado TEXT
+            )
+        ''')
 
-    # Verificamos si las columnas 'estado' y 'descripcion_estado' existen
-    # Esto es para que no tengas que borrar obras.db si ya lo tenías creado
-    cursor.execute("PRAGMA table_info(obras);")
-    columns = [info[1] for info in cursor.fetchall()]
+        # Verificamos si las columnas 'estado' y 'descripcion_estado' existen.
+        # Usamos information_schema para PostgreSQL.
+        cursor.execute(sql.SQL("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'obras'
+        """))
+        existing_columns = [row[0] for row in cursor.fetchall()]
 
-    if 'estado' not in columns:
-        cursor.execute("ALTER TABLE obras ADD COLUMN estado TEXT DEFAULT 'Pendiente';")
-        logger.info("Columna 'estado' añadida a la tabla 'obras'.")
-    if 'descripcion_estado' not in columns:
-        cursor.execute("ALTER TABLE obras ADD COLUMN descripcion_estado TEXT;")
-        logger.info("Columna 'descripcion_estado' añadida a la tabla 'obras'.")
+        if 'estado' not in existing_columns:
+            cursor.execute("ALTER TABLE obras ADD COLUMN estado TEXT DEFAULT 'Pendiente';")
+            logger.info("Columna 'estado' añadida a la tabla 'obras'.")
+        if 'descripcion_estado' not in existing_columns:
+            cursor.execute("ALTER TABLE obras ADD COLUMN descripcion_estado TEXT;")
+            logger.info("Columna 'descripcion_estado' añadida a la tabla 'obras'.")
 
-    conn.commit()
-    conn.close()
-    logger.info("Base de datos inicializada correctamente.")
+        conn.commit()
+        logger.info("Base de datos inicializada correctamente.")
+
+    except Exception as e:
+        logger.error(f"Error al inicializar la base de datos: {e}")
+        if conn:
+            conn.rollback() # Deshace en caso de error
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 # ==========================
 # ESTADOS GLOBALES DE LA CONVERSACIÓN
@@ -311,31 +343,37 @@ async def agregar_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         obra_a_guardar = context.user_data["nueva_obra"]
         logger.info(f"Confirmando y guardando obra: {obra_a_guardar}")
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        conn = None
+        cursor = None
         try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO obras (presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado) VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT INTO obras (presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
-                    obra_a_guardar.get("presupuesto"), # Usar.get para evitar KeyError si falta
+                    obra_a_guardar.get("presupuesto"),
                     obra_a_guardar.get("calle"),
                     obra_a_guardar.get("altura"),
                     obra_a_guardar.get("esquina"),
                     obra_a_guardar.get("elemento"),
                     obra_a_guardar.get("id_elemento"),
-                    obra_a_guardar.get("estado", "Pendiente"), # Usa 'Pendiente' si no se definió estado
-                    obra_a_guardar.get("descripcion_estado"), # Será None si no se definió
+                    obra_a_guardar.get("estado", "Pendiente"),
+                    obra_a_guardar.get("descripcion_estado"),
                 ),
             )
             conn.commit()
             await query.edit_message_text("Obra agregada correctamente a la base de datos.")
             logger.info("Obra guardada con éxito.")
         except Exception as e:
-            conn.rollback() # Deshace la operación en caso de error
+            if conn:
+                conn.rollback() # Deshace la operación en caso de error
             await query.edit_message_text(f"Hubo un error al guardar la obra: {e}")
             logger.error(f"Error al guardar obra: {e}")
         finally:
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     context.user_data["nueva_obra"] = {} # Limpia los datos temporales del usuario
 
@@ -380,29 +418,56 @@ async def ver_obras(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     logger.info("Mostrando obras.")
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # Seleccionamos todas las columnas, incluyendo las nuevas de estado
-    cursor.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado FROM obras ORDER BY id DESC")
-    obras_db = cursor.fetchall()
-    conn.close()
+    conn = None
+    cursor = None
+    obras_db = []
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Para PostgreSQL, `cursor.fetchall()` devuelve tuplas.
+        # Las mapeamos a diccionarios para poder acceder por nombre de columna
+        # como 'obra['presupuesto']' en el mensaje final.
+        cursor.execute("SELECT id, presupuesto, calle, altura, esquina, elemento, id_elemento, estado, descripcion_estado FROM obras ORDER BY id DESC")
+        raw_obras = cursor.fetchall()
+
+        for row in raw_obras:
+            obras_db.append({
+                'id': row[0],
+                'presupuesto': row[1],
+                'calle': row[2],
+                'altura': row[3],
+                'esquina': row[4],
+                'elemento': row[5],
+                'id_elemento': row[6],
+                'estado': row[7],
+                'descripcion_estado': row[8],
+            })
+
+    except Exception as e:
+        logger.error(f"Error al obtener obras de la base de datos: {e}")
+        await query.edit_message_text(f"Hubo un error al cargar las obras: {e}", parse_mode="Markdown")
+        obras_db = [] # Aseguramos que la lista esté vacía para no mostrar nada incompleto
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
     if not obras_db:
         mensaje = "No hay obras registradas aún."
     else:
         mensaje = "**Listado de Obras:**\n\n"
-        for obra in obras_db: # Iteramos sobre cada obra
-            # Ya no mostramos el ID de la base de datos, usamos el presupuesto como identificador principal
+        for obra in obras_db:
             mensaje += f"**Presupuesto: {obra['presupuesto']}**\n"
             mensaje += f" Calle: {obra['calle']}\n"
             mensaje += f" Altura: {obra['altura']}\n"
-            mensaje += f" Esquina: {obra['esquina'] if obra['esquina'] else 'N/A'}\n" # Manejo de esquina None
-            # Combinamos Elemento y ID Elemento en una sola línea
+            mensaje += f" Esquina: {obra['esquina'] if obra['esquina'] else 'N/A'}\n"
             mensaje += f" Elemento: {obra['elemento']} {obra['id_elemento']}\n"
             mensaje += f" Estado: {obra['estado']}\n"
-            if obra['descripcion_estado']: # Solo muestra la descripción si no es NULL
+            if obra['descripcion_estado']:
                 mensaje += f" Descripción Estado: {obra['descripcion_estado']}\n"
-            mensaje += "\n" # Un espacio entre obras
+            mensaje += "\n"
 
     await query.edit_message_text(mensaje, parse_mode="Markdown")
     keyboard = [[InlineKeyboardButton("Volver al Menú Principal", callback_data="PRINCIPAL")]]
@@ -443,29 +508,23 @@ async def modificar_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # INICIO DEL BOT
 # ==========================
 if __name__ == "__main__":
-    init_db() # Asegura que la base de datos y la tabla 'obras' estén configuradas
+    init_db() # La inicialización de la DB se hace al inicio.
 
-    # Intenta obtener el token del bot de las variables de entorno (como en Railway)
     TOKEN = os.environ.get("BOT_TOKEN")
 
-    # Si el token no está configurado, imprime un error y termina el programa
     if not TOKEN:
         logger.error("Error: La variable de entorno 'BOT_TOKEN' no está configurada.")
         logger.error("Por favor, configura 'BOT_TOKEN' con el token de tu bot de Telegram en Railway o en tu entorno local.")
-        exit(1) # Termina la ejecución si no hay token
+        exit(1)
 
     app = ApplicationBuilder().token(TOKEN).build()
     logger.info("ApplicationBuilder creado.")
 
     # --- REGISTRO DE MANEJADORES ---
 
-    # Manejador para el comando /start
     app.add_handler(CommandHandler("start", start))
-
-    # Manejador para el botón "Volver al Menú Principal"
     app.add_handler(CallbackQueryHandler(menu_principal, pattern="^PRINCIPAL$"))
 
-    # Manejador de conversación para la secuencia de "Agregar obra"
     conv_agregar = ConversationHandler(
         entry_points=[CallbackQueryHandler(agregar_start, pattern="^AGREGAR$")],
         states={
@@ -481,12 +540,11 @@ if __name__ == "__main__":
             AGREGAR_DESCRIPCION_ESTADO: [MessageHandler(filters.TEXT & ~filters.COMMAND, agregar_descripcion_estado)],
             AGREGAR_CONFIRMAR: [CallbackQueryHandler(agregar_confirmar, pattern="^CONFIRMAR_OBRA$")],
         },
-        fallbacks=[CallbackQueryHandler(cancelar, pattern="^CANCEL$")], # Maneja la cancelación en cualquier estado
+        fallbacks=[CallbackQueryHandler(cancelar, pattern="^CANCEL$")],
     )
     app.add_handler(conv_agregar)
     logger.info("ConversationHandler 'agregar_obra' registrado.")
 
-    # Manejadores para el resto de las opciones del menú principal
     app.add_handler(CallbackQueryHandler(ver_obras, pattern="^VER$"))
     app.add_handler(CallbackQueryHandler(editar_start, pattern="^EDITAR$"))
     app.add_handler(CallbackQueryHandler(eliminar_start, pattern="^ELIMINAR$"))
@@ -494,4 +552,4 @@ if __name__ == "__main__":
     logger.info("Manejadores de menú principal registrados.")
 
     logger.info("Bot iniciado y esperando mensajes...")
-    app.run_polling(poll_interval=1.0) # Inicia el bot para escuchar actualizaciones de Telegram, con un intervalo de sondeo
+    app.run_polling(poll_interval=1.0)
